@@ -1,0 +1,400 @@
+---
+title: "Team Project 1"
+author: "Peter Shoemaker"
+date: "10/1/2021"
+output: html_document
+---
+
+```{r setup}
+library(dplyr)
+library(ggplot2)
+library(rdd)
+library(rlang)
+library(ggplot2)
+library(FitAR)
+knitr::opts_chunk$set(echo = TRUE)
+cat("\014") 
+rm(list=ls())
+
+#edited date format in excel
+setwd("C:\\Users\\Peter Shoemaker\\OneDrive\\Desktop\\Grad School\\Strategic Marketing Analytics")
+
+data = read.csv("usliquorsales.csv")
+
+#removes empty rows
+data <- filter(data, data$Period != "")
+
+data$Period <- as.Date(data$Period, "%m/%d/%Y")
+data$ref_month = 0:(nrow(data) - 1)
+
+data$Value <- gsub(",","",data$Value)
+data$Value = as.integer(data$Value)
+
+#deletes first few entries to ensure there are no partial years of data
+#preserves newest observations because they are more useful than oldest observations
+data <-  tail(data, n = 348)
+
+
+
+```
+
+
+
+```{r overall time series}
+#2. Plot monthly sales data
+ts_plot <- ggplot(data, aes(Period, Value)) + geom_line() + 
+  xlab("Month") +
+  ylab("Value") +
+  scale_x_date(labels = date_format(format = "%Y-%m"), breaks = date_breaks("5 year")) +
+  stat_smooth(colour = "green")
+ts_plot
+
+```
+```{r one_year}
+p <- ggplot(data, aes(x=Period, y=Value)) +
+  geom_line( color="steelblue") + 
+  geom_point() +
+  xlab("") +
+  theme(axis.text.x=element_text(angle=60, hjust=1)) +
+  scale_x_date(limit=c(as.Date("2001-01-01"),as.Date("2005-01-01")))
+p
+
+```
+
+```{r time series object}
+data_ts <- ts(data[,c("Value")], deltat = 12/12)
+
+#plot time series with trend line
+plot(data_ts, col = "blue", main = "Liquor Sales Time Series Data")
+abline(reg = lm(data_ts ~ time(data_ts)), col = "black")
+
+```
+
+```{r autocorrelation}
+#Autocorrelation
+Acf(data_ts)
+
+```
+
+```{r partial_autocorrelation}
+Pacf(data_ts)
+
+```
+
+```{r lag_plot}
+#Lag plot of Data
+gglagplot(data_ts, set.lags=1:12)
+
+
+#Ljung-Box test on the first 24 Lag autocorrelations
+
+Box.test(data_ts, lag=24, fitdf=0, type="Lj")
+```
+
+```{r additive_decomposition}
+
+data_tsd <-ts(data[,c('Value')], frequency=12)
+
+component.ts = decompose(data_tsd)
+plot(component.ts)
+
+```
+
+```{r LOESS}
+#We can also use STL (Seasonal and Trend Decomposition using LOESS)
+#LOESS is a method for estimating nonlinear relationships
+#Advantage of LOESS: handle any type of seasonality, seasonal component changes over time, 
+#smoothness of trend can be controlled by user and can be robust to outliers
+
+data_tsd %>%
+  stl(t.window=24, s.window="periodic", robust=TRUE) %>%
+  autoplot()
+
+```
+
+```{r ts_clean}
+#tsclean() identifies and replaces outliers using series smoothing and decomposition.
+#tsclean() can also impute missing values in the series if there are any
+#We are using the ts() command to create a time series object to pass to tsclean()
+data$Value <-tsclean(data_ts)
+
+#Plot the cleaned data
+c_ts_plot <- ggplot(data, aes(Period,Value)) + geom_line(na.rm=TRUE) + 
+  xlab("Month") + ylab("Liquor Sales") + 
+  scale_x_date(labels = date_format(format= "%Y-%m"),breaks = date_breaks("1 year")) + 
+  stat_smooth(colour="green") +
+  scale_x_date(labels = date_format(format = "%Y-%m"), breaks = date_breaks("5 year"))
+c_ts_plot
+
+
+#Lets compare both cleaned and uncleaned plots
+grid.arrange(ts_plot,c_ts_plot,ncol=1, top = textGrob("Uncleaned vs Cleaned Series"))
+
+```
+
+```{r smoothing}
+#Smoothing the time series and looking at the decomposed time series again
+my_ts <- ts(na.omit(data$Value), frequency = 12)
+plot(my_ts)
+
+component.ts2 = decompose(my_ts)
+plot(component.ts2)
+
+```
+
+```{r naive_forecasting}
+naive_forecast <-naive(data_ts, 24)
+summary(naive_forecast)
+autoplot(naive_forecast)
+#Check for fitted values and residuals
+checkresiduals(naive_forecast)
+```
+
+```{r random_walk}
+#4. Random walk model
+rw_forecast <-rwf(data_ts, 24, drift=FALSE)
+summary(rw_forecast)
+
+
+#With drift
+rwd_forecast <-rwf(data_ts, 24, drift=TRUE)
+summary(rwd_forecast)
+
+autoplot(rwd_forecast)
+```
+
+```{r white_noise}
+#white noise series (non-stationary series)
+wn <- arima(data_ts, order=c(0,0,0))
+summary(wn)
+
+```
+
+```{r MA_5}
+#5. Smoothing the Series to uncover patterns in data
+#Moving Averages
+#MA of order 5 (generally of odd numbers)
+
+auto_ma<-ma(data_ts, 5)
+autoplot(data_ts, series="Data") +
+  autolayer(ma(data_ts,5), series="5-MA") +
+  xlab("Year") + ylab("Sales") +
+  ggtitle("Liquor Sales Moving Average - 5 months") +
+  scale_colour_manual(values=c("Data"="grey50","5-MA"="red"),
+                      breaks=c("Data","5-MA"))
+
+```
+
+```{r MA_3}
+#MA of order 3
+autoplot(data_ts, series="Data") +
+  autolayer(ma(data_ts,3), series="3-MA") +
+  xlab("Year") + ylab("Sales") +
+  ggtitle("Liquor Sales Moving Average - 3 months") +
+  scale_colour_manual(values=c("Data"="grey50","3-MA"="red"),
+                      breaks=c("Data","3-MA"))
+
+```
+
+```{r MA_9}
+#MA of order 9
+autoplot(data_ts, series="Data") +
+  autolayer(ma(data_ts,9), series="9-MA") +
+  xlab("Year") + ylab("Sales") +
+  ggtitle("Liquor Sales Moving Average - 9 months") +
+  scale_colour_manual(values=c("Data"="grey50","9-MA"="red"),
+                      breaks=c("Data","9-MA"))
+
+```
+
+```{r MA_MA}
+#Moving Average of Moving Averages (only for even order moving average to make them symmetric)
+#A 2x4 moving average
+
+autoplot(data_ts, series = "Data") + 
+  autolayer(ma(data_ts, order = 4, centre = TRUE), series = "2x4-MA") +
+  labs(x = "Year", y = "Sales") + 
+  ggtitle("2x4 moving average of liquor sales")
+
+```
+
+```{r remove_seasonality}
+#Removing Seasonal effects (if it is there- say a 1 year seasonal variation)
+autoplot(data_ts, series = "Data") + 
+  autolayer(ma(data_ts, 12), series = "12-MA") +
+  labs(x = "Year", y = "Sales") + 
+  ggtitle("12-month moving average of liquor sales") +
+  scale_colour_manual(values=c("Data"="grey50","12-MA"="red"),
+                      breaks=c("Data","12-MA"))
+
+```
+
+```{r exponential_smoothing}
+#Simple exponential smoothing used only for models that dont have any trend or Seasonality
+data_ses <-ses(data_ts, alpha=0.2, h=24)
+autoplot(data_ses)
+
+
+#We can remove the trend simply by differencing the data
+data_dif <-diff(data_ts)
+autoplot(data_dif)
+
+
+#Once we’ve differenced we’ve effectively removed the trend from our data and can reapply the SES model
+data_ses2 <-ses(data_dif, alpha=0.2, h=24)
+autoplot(data_ses2)
+```
+
+```{r ARIMA}
+#Forecasting using ARIMA
+#6. Making the series stationary (identify level of differencing required) 
+#we need to remove trend by using appropriate order of difference and make the series stationary. 
+#We do this by looking at acf, Dickey-Fuller Test and standard deviation.
+#DICKEY FULLER TEST 
+#(We have to test if Rho - 1 is significantly different than zero or not. 
+#If the null hypothesis gets rejected, we’ll get a stationary time series.)
+#First, confirm that the series is non-stationary using augmented DF test
+adf.test(data_ts)
+
+#To convert series to stationary, we need to know the level of differencing required
+#Look at ACF (autocorrelation plot for the series to identify the order of differencing required)
+Acf(data_ts)
+Pacf(data_ts)
+
+```
+
+```{r 1_order_differencing}
+#using differencing: lets try order 1 difference
+#We will fit ARIMA(0,d,0)(0,D,0)[12] models 
+#and verify acf residuals to find which ‘d’ or ‘D’ order of differencing is appropriate in our case.
+#Applying only one order of difference i.e ARIMA(0,1,0)(0,0,0)
+dfit1 <-arima(data_ts, order=c(0,1,0))
+plot(residuals(dfit1))
+
+Acf(residuals(dfit1))
+Pacf(residuals(dfit1))
+```
+
+```{r 1_seasonal_difference}
+#Because the seasonal pattern is strong and stable, 
+#we will want to use an order of seasonal differencing in the model. 
+#Before that let’s try only with one seasonal difference i.e ARIMA(0,0,0)(0,1,0)
+
+dfit2 <- arima(data_ts, order =c(0,0,0), seasonal = list(order = c(0,1,0), period = 12))
+plot(residuals(dfit2))
+Acf(residuals(dfit2))
+Pacf(residuals(dfit2))
+
+```
+
+```{r season_and_non_seasonal}
+#lets try and apply both seasonal and non-seasonal differencing, ARIMA(0,1,0)(0,1,0)[12]
+dfit3 <- arima(data_ts, order =c(0,1,0), seasonal = list(order = c(0,1,0), period = 12))
+plot(residuals(dfit3))
+Acf(residuals(dfit3))
+Pacf(residuals(dfit3))
+
+summary(dfit1)
+summary(dfit2)
+
+#dfit3 has the best performance metrics
+#this is the correct order of differencing
+summary(dfit3)
+```
+
+```{r AR_and_MA_values}
+#Now, we need to identify AR/MA and SAR/SMA values and fit the model
+
+dfit4 <- arima(data_ts, order =c(0,1,1), seasonal = list(order = c(0,1,0), period = 12))
+plot(residuals(dfit4))
+Acf(residuals(dfit4))
+Pacf(residuals(dfit4))
+
+
+#Add a one-order MA component to the seasonal part and see what we get
+dfit5 <- arima(data_ts, order =c(0,1,0), seasonal = list(order = c(0,1,1), period = 12))
+plot(residuals(dfit5))
+Acf(residuals(dfit5))
+Pacf(residuals(dfit5))
+```
+
+```{r combine_MA_component_non_seasonal}
+dfit6 <- arima(data_ts, order =c(0,1,1), seasonal = list(order = c(0,1,1), period = 12))
+plot(residuals(dfit6))
+Acf(residuals(dfit6))
+Pacf(residuals(dfit6))
+
+
+summary(dfit4)
+summary(dfit5)
+summary(dfit6)
+```
+
+```{r coefficients_significance}
+
+#The coeftest() function in lmtest package can help us in getting the p-values of coefficients.
+#We want to check if the coefficients are significant or not
+coeftest(dfit6)
+
+#significance of coefficients
+a = par(mfrow=c(1,1))
+checkresiduals(dfit6)
+
+```
+
+```{r residual_diagnostics}
+boxresult<-LjungBoxTest(dfit6$residuals,k=1,StartLag=1) # one or more errors to lag 1 are equal to 0
+boxresult
+#no independent errors
+plot(boxresult[,3],main="Ljung-Box Q Test", ylab="P-values", xlab="Lag")
+```
+
+```{r auto_arima}
+dfit7 <- auto.arima(data_ts, seasonal = TRUE)
+plot(residuals(dfit7))
+Acf(residuals(dfit7))
+Pacf(residuals(dfit7))
+
+summary(dfit7)
+coeftest(dfit7)
+checkresiduals(dfit7)
+```
+
+```{r model_validation}
+hold <- window(ts(data_ts), start = 323)
+
+#we will forecast data for the last two years (month = 323 to 347)
+fit_predicted <- arima(ts(data_ts[-c(323:347)]), order =c(0,1,1), seasonal = list(order = c(0,1,1), period = 12))
+
+#use the model to forecast values for last 24 months. 
+#Specify forecast horizon h periods ahead of prediction to be made 
+#and use the fitted model to generate those predictions
+
+forecast_pred <- forecast(fit_predicted,h=24)
+plot(forecast_pred, main="")
+lines(ts(data_ts))
+summary(forecast_pred)
+```
+
+```{r forecasting}
+#8. Forecasting
+#Next step is to forecast the sales for another 24 months ahead of time. 
+f_values <-forecast(dfit6, h=24)
+plot(f_values, main="")
+```
+
+```{r }
+
+```
+
+```{r }
+
+```
+
+```{r }
+
+```
+
+```{r }
+
+```
